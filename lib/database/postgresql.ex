@@ -4,6 +4,7 @@ defmodule Plsm.Database.PostgreSQL do
             username: "postgres",
             password: "postgres",
             database_name: "db",
+            prefix: "public",
             connection: nil
 end
 
@@ -15,7 +16,8 @@ defimpl Plsm.Database, for: Plsm.Database.PostgreSQL do
       port: configs.database.port,
       username: configs.database.username,
       password: configs.database.password,
-      database_name: configs.database.database_name
+      database_name: configs.database.database_name,
+      prefix: configs.database.prefix
     }
   end
 
@@ -36,17 +38,22 @@ defimpl Plsm.Database, for: Plsm.Database.PostgreSQL do
       port: db.port,
       username: db.username,
       password: db.password,
-      database_name: db.database_name
+      database_name: db.database_name,
+      prefix: db.prefix
     }
   end
 
   # pass in a database and then get the tables using the Postgrex query then turn the rows into a table
   @spec get_tables(Plsm.Database.PostgreSQL) :: [Plsm.Database.TableHeader]
   def get_tables(db) do
+    {:ok, _result} =
+      Postgrex.query(db.connection, "SET search_path TO #{db.prefix},public;", [])
+      |> IO.inspect(label: "set search_path")
+
     {_, result} =
       Postgrex.query(
         db.connection,
-        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';",
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = '#{db.prefix}';",
         []
       )
 
@@ -57,7 +64,7 @@ defimpl Plsm.Database, for: Plsm.Database.PostgreSQL do
 
   @spec get_columns(Plsm.Database.PostgreSQL, Plsm.Database.Table) :: [Plsm.Database.Column]
   def get_columns(db, table) do
-    {_, result} = Postgrex.query(db.connection, "
+    case Postgrex.query(db.connection, "
           SELECT DISTINCT
             a.attname as column_name,
             format_type(a.atttypid, a.atttypmod) as data_type,
@@ -98,10 +105,15 @@ defimpl Plsm.Database, for: Plsm.Database.PostgreSQL do
         AND pg_table_is_visible(pgc.oid)
         AND NOT a.attisdropped
         AND pgc.relname = '#{table.name}'
-        ORDER BY a.attnum;", [])
+        ORDER BY a.attnum;", []) do
+      {:ok, result} ->
+        result.rows
+        |> Enum.map(&to_column/1)
+        |> IO.inspect(label: "column result")
 
-    result.rows
-    |> Enum.map(&to_column/1)
+      {:error, error} ->
+        IO.inspect(error)
+    end
   end
 
   defp to_column(row) do
@@ -128,6 +140,7 @@ defimpl Plsm.Database, for: Plsm.Database.PostgreSQL do
       String.starts_with?(upcase, "INTEGER") == true -> :integer
       String.starts_with?(upcase, "INT") == true -> :integer
       String.starts_with?(upcase, "BIGINT") == true -> :integer
+      String.starts_with?(upcase, "SMALLINT") == true -> :integer
       String.contains?(upcase, "CHAR") == true -> :string
       String.starts_with?(upcase, "TEXT") == true -> :string
       String.starts_with?(upcase, "FLOAT") == true -> :float
@@ -139,6 +152,8 @@ defimpl Plsm.Database, for: Plsm.Database.PostgreSQL do
       String.starts_with?(upcase, "DATETIME") == true -> :date
       String.starts_with?(upcase, "TIMESTAMP") == true -> :date
       String.starts_with?(upcase, "BOOLEAN") == true -> :boolean
+      String.starts_with?(upcase, "BYTEA") == true -> :binary
+      String.starts_with?(upcase, "UUID") == true -> :uuid
       true -> :none
     end
   end
