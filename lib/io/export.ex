@@ -5,7 +5,9 @@ defmodule Plsm.IO.Export do
 
   @id "id"
 
-  def type_output({"id", _type, _true}), do: ""
+  def type_output({"id", _type, true}), do: "# primary :id\n"
+
+  def type_output({"id", _type, false}), do: "# non-primary :id\n"
 
   def type_output({name, type, is_primary_key?}) do
     escaped_name = escaped_name(name)
@@ -34,6 +36,9 @@ defmodule Plsm.IO.Export do
   @doc """
   When escaped name and name are the same, source option is not needed
   """
+  defp type_output_with_source(escaped_name, escaped_name, mapped_type, false),
+    do: "field :#{escaped_name}, #{mapped_type}\n"
+
   defp type_output_with_source(escaped_name, escaped_name, mapped_type, is_primary_key?),
     do: "field :#{escaped_name}, #{mapped_type}, primary_key: #{is_primary_key?}\n"
 
@@ -96,7 +101,11 @@ defmodule Plsm.IO.Export do
   end
 
   defp module_declaration(project_name, table_name) do
-    namespace = Plsm.Database.TableHeader.table_name(table_name)
+    <<pre::binary-size(2), rest::binary>> = table_name
+    name = Enum.map([pre, ".", rest], &String.capitalize/1) |> Enum.join()
+
+    namespace = Plsm.Database.TableHeader.table_name(name)
+
     "defmodule #{project_name}.#{namespace} do\n"
   end
 
